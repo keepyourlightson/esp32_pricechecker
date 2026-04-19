@@ -283,27 +283,37 @@ void updatePrices() {
                         JsonArray pairs = doc["pairs"];
                         for (String addr : addresses) {
                             addr.trim();
+                            double maxVolume = -1.0;
+                            JsonVariant bestPair;
                             bool found = false;
+
                             for (JsonVariant pair : pairs) {
                                 String baseAddr = pair["baseToken"]["address"].as<String>();
                                 baseAddr.trim();
                                 if (baseAddr.equalsIgnoreCase(addr)) {
-                                    Asset a;
-                                    a.address = addr;
-                                    a.symbol = pair["baseToken"]["symbol"].as<String>();
-                                    a.type = 0;
-                                    a.price = pair["priceUsd"].as<double>();
-                                    a.p24 = pair["priceChange"]["h24"].as<double>();
-                                    a.p6  = pair["priceChange"]["h6"].as<double>();
-                                    a.p1  = pair["priceChange"]["h1"].as<double>();
-                                    a.m5  = pair["priceChange"]["m5"].as<double>();
-                                    a.hasHistory = true;
-                                    newAssets.push_back(a);
-                                    found = true;
-                                    break;
+                                    double vol = pair["volume"]["h24"].as<double>();
+                                    // Выбираем пару с максимальным объемом торгов, чтобы отсеять скам-сети
+                                    if (vol >= maxVolume) {
+                                        maxVolume = vol;
+                                        bestPair = pair;
+                                        found = true;
+                                    }
                                 }
                             }
-                            if(!found) {
+                            
+                            if (found) {
+                                Asset a;
+                                a.address = addr;
+                                a.symbol = bestPair["baseToken"]["symbol"].as<String>();
+                                a.type = 0;
+                                a.price = bestPair["priceUsd"].as<double>();
+                                a.p24 = bestPair["priceChange"]["h24"].as<double>();
+                                a.p6  = bestPair["priceChange"]["h6"].as<double>();
+                                a.p1  = bestPair["priceChange"]["h1"].as<double>();
+                                a.m5  = bestPair["priceChange"]["m5"].as<double>();
+                                a.hasHistory = true;
+                                newAssets.push_back(a);
+                            } else {
                                 Asset a;
                                 a.address = addr;
                                 a.symbol = "???";
