@@ -117,4 +117,4 @@ A compact, stylish, hardware-based cryptocurrency price tracker featuring a stun
    - Вставьте адрес смарт-контракта с DexScreener, проверьте его в предпросмотре и нажмите **"Save Config"**!
 
 ---
-*Создано с ❤️ и работает на DexScreener API.*
+
