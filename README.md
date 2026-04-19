@@ -1,10 +1,10 @@
 # ESP32 Crypto Tracker
 
-*[🇬🇧 ENG](#-in-english)* | *[🇷🇺 RUS](#-на-русском)*
+*[Read in English](#english)* | *[Читать на Русском](#на-русском)*
 
 ---
 
-## 🇬🇧 In English
+## English
 
 A compact, stylish, hardware-based cryptocurrency price tracker featuring a stunning web interface and a beautiful 128x64 OLED display.
 
@@ -61,7 +61,7 @@ A compact, stylish, hardware-based cryptocurrency price tracker featuring a stun
 
 ---
 
-## 🇷🇺 На Русском
+## На Русском
 
 Компактный стильный аппаратный трекер цен на криптовалюту с красивым веб-интерфейсом и OLED-дисплеем 128x64 (с поддержкой двухцветных желто-синих экранов).
 
