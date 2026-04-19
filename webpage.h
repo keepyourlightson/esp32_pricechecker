@@ -1,9 +1,4 @@
-#ifndef WEBPAGE_H
-#define WEBPAGE_H
-
-#include <Arduino.h>
-
-const char index_html[] PROGMEM = R"=====(
+const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -340,6 +335,9 @@ const char index_html[] PROGMEM = R"=====(
     let trackedAddresses = [];
     let isConnected = false;
 
+    // We only need an array of addresses for the ESP32.
+    // The frontend will resolve symbols via DexScreener to display nicely.
+    
     // Check connection with mock fallback for local dev
     async function loadConfig() {
         try {
@@ -358,6 +356,7 @@ const char index_html[] PROGMEM = R"=====(
         } catch (e) {
             console.warn("Failed to fetch from ESP32. Assuming local test mode.", e);
             setConnectionStatus(false);
+            // Local mockup if running from desktop
             if(window.location.protocol === 'file:') {
                 trackedAddresses = JSON.parse(localStorage.getItem('mockAddresses') || '[]');
             }
@@ -413,33 +412,24 @@ const char index_html[] PROGMEM = R"=====(
         listEl.innerHTML = '<div class="empty-state">Loading data from DexScreener...</div>';
         
         try {
+            // Join addresses by comma for batch query
             const joined = trackedAddresses.join(',');
             const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${joined}`);
             const data = await res.json();
             
             if (!data.pairs) {
-                listEl.innerHTML = '<div class="empty-state">Error fetching data. Check addresses.</div>';
-                
-                // Allow removing even if offline/error
-                listEl.innerHTML = '';
-             trackedAddresses.forEach(addr => {
-                const card = document.createElement('div');
-                card.className = 'asset-card';
-                card.innerHTML = `
-                        <div class="asset-info">
-                            <span class="asset-symbol">Offline/Error Data</span>
-                            <span class="asset-chain">${addr.substring(0,6)}...${addr.substring(addr.length-4)}</span>
-                        </div>
-                        <button class="btn-icon" onclick="removeAsset('${addr}')" title="Stop Tracking">
-                            <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
-                    `;
-                 listEl.appendChild(card);
-             });
-                
+                listEl.innerHTML = '<div class="empty-state">Error fetching data.</div>';
                 return;
             }
 
+            // На случай если несколько сетей используют один адрес контракта (защита от мусорных пар)
+            data.pairs.sort((a, b) => {
+                const volA = a.volume && a.volume.h24 ? a.volume.h24 : 0;
+                const volB = b.volume && b.volume.h24 ? b.volume.h24 : 0;
+                return volB - volA;
+            });
+
+            // We only want the first matching pair for each address
             const uniquePairs = [];
             const seen = new Set();
             data.pairs.forEach(p => {
@@ -452,6 +442,7 @@ const char index_html[] PROGMEM = R"=====(
 
             listEl.innerHTML = '';
             
+            // Render
             trackedAddresses.forEach(addr => {
                 const pair = uniquePairs.find(p => p.baseToken.address.toLowerCase() === addr.toLowerCase());
                 const card = document.createElement('div');
@@ -524,6 +515,7 @@ const char index_html[] PROGMEM = R"=====(
             return;
         }
 
+        // Verify with Dexscreener to provide immediate feedback
         btn.disabled = true;
         btn.innerHTML = 'Verifying...';
 
@@ -544,6 +536,7 @@ const char index_html[] PROGMEM = R"=====(
             addrInput.value = '';
             updateUI();
             
+            // Switch to list to see the added token
             alert('Added successfully!');
             switchTab('list');
             document.querySelectorAll('.tab')[1].classList.add('active');
@@ -581,15 +574,17 @@ const char index_html[] PROGMEM = R"=====(
         }
     }
 
+    // Include standard Google Fonts programmatically or rely on system fonts
     const link = document.createElement('link');
     link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap';
     link.rel = 'stylesheet';
     document.head.appendChild(link);
 
+    // Initial load
     loadConfig();
+
 </script>
 </body>
 </html>
-)=====";
 
-#endif
+)rawliteral";

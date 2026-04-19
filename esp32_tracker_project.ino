@@ -118,7 +118,7 @@ void setup() {
 
     // Настройка Web Сервера
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-        request->send_P(200, "text/html", index_html);
+        request->send_P(200, "text/html", INDEX_HTML);
     });
 
     server.on("/api/assets", HTTP_GET, [](AsyncWebServerRequest *request){

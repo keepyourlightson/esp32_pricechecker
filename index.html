@@ -421,6 +421,13 @@
                 return;
             }
 
+            // На случай если несколько сетей используют один адрес контракта (защита от мусорных пар)
+            data.pairs.sort((a, b) => {
+                const volA = a.volume && a.volume.h24 ? a.volume.h24 : 0;
+                const volB = b.volume && b.volume.h24 ? b.volume.h24 : 0;
+                return volB - volA;
+            });
+
             // We only want the first matching pair for each address
             const uniquePairs = [];
             const seen = new Set();
