@@ -40,6 +40,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &SPI, OLED_DC, OLED_RESET,
 AsyncWebServer server(80);
 Preferences preferences;
 
+struct TrackedItem {
+    String address;
+    double entryPrice;
+};
+
 struct Asset {
     String address;
     String symbol;
@@ -50,12 +55,11 @@ struct Asset {
     double p1;
     double m5;
     bool hasHistory;
+    double entryPrice;
 };
 
-
-
 std::vector<Asset> trackedAssets;
-std::vector<String> addresses;
+std::vector<TrackedItem> trackedItems;
 int currentAssetIndex = 0;
 
 unsigned long lastDrawTime = 0;
@@ -123,9 +127,11 @@ void setup() {
 
     server.on("/api/assets", HTTP_GET, [](AsyncWebServerRequest *request){
         DynamicJsonDocument doc(1024);
-        JsonArray arr = doc.createNestedArray("addresses");
-        for(String addr : addresses) {
-            arr.add(addr);
+        JsonArray arr = doc.createNestedArray("items");
+        for(TrackedItem item : trackedItems) {
+            JsonObject obj = arr.createNestedObject();
+            obj["address"] = item.address;
+            obj["entryPrice"] = item.entryPrice;
         }
         String response;
         serializeJson(doc, response);
@@ -171,24 +177,36 @@ void loop() {
 }
 
 void loadConfig() {
-    addresses.clear();
+    trackedItems.clear();
     String json = preferences.getString("addresses", "[]");
     
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(2048);
     DeserializationError error = deserializeJson(doc, json);
     if (!error) {
         JsonArray arr = doc.as<JsonArray>();
         for(JsonVariant v : arr) {
-            addresses.push_back(v.as<String>());
+            if (v.is<String>()) {
+                TrackedItem itm;
+                itm.address = v.as<String>();
+                itm.entryPrice = 0.0;
+                trackedItems.push_back(itm);
+            } else if (v.is<JsonObject>()) {
+                TrackedItem itm;
+                itm.address = v["address"].as<String>();
+                itm.entryPrice = v["entryPrice"].as<double>();
+                trackedItems.push_back(itm);
+            }
         }
     }
 }
 
 void saveConfig() {
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(2048);
     JsonArray arr = doc.to<JsonArray>();
-    for(String addr : addresses) {
-        arr.add(addr);
+    for(TrackedItem item : trackedItems) {
+        JsonObject obj = arr.createNestedObject();
+        obj["address"] = item.address;
+        obj["entryPrice"] = item.entryPrice;
     }
     String json;
     serializeJson(doc, json);
@@ -196,13 +214,16 @@ void saveConfig() {
 }
 
 void handlePostAssets(uint8_t *data, size_t len) {
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(2048);
     DeserializationError error = deserializeJson(doc, (const char*)data, len);
     if (!error) {
-        addresses.clear();
-        JsonArray arr = doc["addresses"];
+        trackedItems.clear();
+        JsonArray arr = doc["items"];
         for(JsonVariant v : arr) {
-            addresses.push_back(v.as<String>());
+            TrackedItem itm;
+            itm.address = v["address"].as<String>();
+            itm.entryPrice = v["entryPrice"].as<double>();
+            trackedItems.push_back(itm);
         }
         saveConfig();
         currentAssetIndex = 0;
@@ -223,8 +244,8 @@ void updatePrices() {
         // === 1. СТАТИЧНЫЕ АКТИВЫ (ETH, BTC) ===
         // DexScreener может отдать щиток, если искать просто по адресу контракта WETH/WBTC.
         // Поэтому мы запрашиваем конкретные сверхликвидные пулы Uniswap V3 (USDC-пары).
-        Asset btcAsset; btcAsset.symbol = "BTC"; btcAsset.type = 1; btcAsset.price = 0.0; btcAsset.hasHistory = false;
-        Asset ethAsset; ethAsset.symbol = "ETH"; ethAsset.type = 2; ethAsset.price = 0.0; ethAsset.hasHistory = false;
+        Asset btcAsset; btcAsset.symbol = "BTC"; btcAsset.type = 1; btcAsset.price = 0.0; btcAsset.hasHistory = false; btcAsset.entryPrice = 0.0;
+        Asset ethAsset; ethAsset.symbol = "ETH"; ethAsset.type = 2; ethAsset.price = 0.0; ethAsset.hasHistory = false; ethAsset.entryPrice = 0.0;
 
         String btcPair = "0x99ac8cA7087fA4A2A1FB6357269965A2014ABc35"; 
         String ethPair = "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"; 
@@ -264,24 +285,23 @@ void updatePrices() {
         newAssets.push_back(btcAsset);
         newAssets.push_back(ethAsset);
 
-        // === 2. КАСТОМНЫЕ ТОКЕНЫ ИЗ НАСТРОЕК ===
-        if (addresses.size() > 0) {
-            String joined = "";
-            for (int i = 0; i < addresses.size(); i++) {
-                joined += addresses[i];
-                if (i < addresses.size() - 1) joined += ",";
+        // === 2. КАСТОМНЫЕ АКТИВЫ ===
+        if (trackedItems.size() > 0) {
+            String customUrl = "https://api.dexscreener.com/latest/dex/tokens/";
+            for (size_t i = 0; i < trackedItems.size(); i++) {
+                customUrl += trackedItems[i].address;
+                if (i < trackedItems.size() - 1) customUrl += ",";
             }
-
-            String url = "https://api.dexscreener.com/latest/dex/tokens/" + joined;
             
-            if (https.begin(*client, url)) {
+            if (https.begin(*client, customUrl)) {
                 int httpCode = https.GET();
                 if (httpCode == HTTP_CODE_OK) {
                     String payload = https.getString();
                     DynamicJsonDocument doc(65536);
                     if (!deserializeJson(doc, payload)) {
                         JsonArray pairs = doc["pairs"];
-                        for (String addr : addresses) {
+                        for (TrackedItem item : trackedItems) {
+                            String addr = item.address;
                             addr.trim();
                             double maxVolume = -1.0;
                             JsonVariant bestPair;
@@ -312,6 +332,7 @@ void updatePrices() {
                                 a.p1  = bestPair["priceChange"]["h1"].as<double>();
                                 a.m5  = bestPair["priceChange"]["m5"].as<double>();
                                 a.hasHistory = true;
+                                a.entryPrice = item.entryPrice;
                                 newAssets.push_back(a);
                             } else {
                                 Asset a;
@@ -320,6 +341,7 @@ void updatePrices() {
                                 a.type = 0;
                                 a.price = 0.0;
                                 a.hasHistory = false;
+                                a.entryPrice = item.entryPrice;
                                 newAssets.push_back(a);
                             }
                         }
@@ -438,16 +460,31 @@ void drawOLED() {
             priceStr += String(current.price, 2);
         }
         
-        display.setTextSize(2);
-        display.getTextBounds(priceStr, 0, 0, &x1, &y1, &w, &h);
-        if (w > 128) {
+        if (current.entryPrice > 0.0 && current.price > 0.0) {
+            // Рассчитываем PnL % и показываем (оба мелким шрифтом)
+            double pnl = ((current.price - current.entryPrice) / current.entryPrice) * 100.0;
+            String pnlStr = " (";
+            if (pnl > 0) pnlStr += "+";
+            pnlStr += String(pnl, 1) + "%)";
+            priceStr += pnlStr;
+            
             display.setTextSize(1);
             display.getTextBounds(priceStr, 0, 0, &x1, &y1, &w, &h);
-            display.setCursor((128 - w) / 2, 48); // Центр (мелкий текст)
+            display.setCursor((128 - w) / 2, 48);
+            display.println(priceStr);
         } else {
-            display.setCursor((128 - w) / 2, 44); // Центр (крупный текст)
+            // Классический вывод только цены (крупно или мелко, если не влазит)
+            display.setTextSize(2);
+            display.getTextBounds(priceStr, 0, 0, &x1, &y1, &w, &h);
+            if (w > 128) {
+                display.setTextSize(1);
+                display.getTextBounds(priceStr, 0, 0, &x1, &y1, &w, &h);
+                display.setCursor((128 - w) / 2, 48); // Центр (мелкий текст)
+            } else {
+                display.setCursor((128 - w) / 2, 44); // Центр (крупный текст)
+            }
+            display.println(priceStr);
         }
-        display.println(priceStr);
 
         // === ПРОГРЕСС БАР (Y: 62) ===
         int totalScreens = trackedAssets.size() + 1;

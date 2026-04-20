@@ -313,6 +313,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             <input type="text" id="contract" placeholder="e.g. 0x..." autocomplete="off" spellcheck="false">
         </div>
 
+        <div class="form-group">
+            <label for="entryPrice">Entry Price (Optional)</label>
+            <input type="number" step="any" id="entryPrice" placeholder="e.g. 0.05" autocomplete="off">
+        </div>
+
         <button class="btn-primary" id="btnAdd" onclick="addAsset()">
             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"></path></svg>
             Add to Tracker
@@ -332,12 +337,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 <script>
     const MAX_ASSETS = 5;
-    let trackedAddresses = [];
+    let trackedItems = []; // Array of objects: { address: String, entryPrice: Number }
     let isConnected = false;
 
-    // We only need an array of addresses for the ESP32.
-    // The frontend will resolve symbols via DexScreener to display nicely.
-    
     // Check connection with mock fallback for local dev
     async function loadConfig() {
         try {
@@ -348,7 +350,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             
             if (res.ok) {
                 const data = await res.json();
-                trackedAddresses = data.addresses || [];
+                trackedItems = data.items || [];
                 setConnectionStatus(true);
             } else {
                 setConnectionStatus(false);
@@ -358,7 +360,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             setConnectionStatus(false);
             // Local mockup if running from desktop
             if(window.location.protocol === 'file:') {
-                trackedAddresses = JSON.parse(localStorage.getItem('mockAddresses') || '[]');
+                trackedItems = JSON.parse(localStorage.getItem('mockItems') || '[]');
             }
         }
         updateUI();
@@ -366,8 +368,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     async function saveConfig() {
         if(window.location.protocol === 'file:') {
-            localStorage.setItem('mockAddresses', JSON.stringify(trackedAddresses));
-            console.log("Saved local mockup", trackedAddresses);
+            localStorage.setItem('mockItems', JSON.stringify(trackedItems));
+            console.log("Saved local mockup", trackedItems);
             return;
         }
 
@@ -375,7 +377,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             await fetch('/api/assets', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ addresses: trackedAddresses })
+                body: JSON.stringify({ items: trackedItems })
             });
             setConnectionStatus(true);
         } catch(e) {
@@ -404,7 +406,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     async function renderList() {
         const listEl = document.getElementById('assetList');
-        if (trackedAddresses.length === 0) {
+        if (trackedItems.length === 0) {
             listEl.innerHTML = '<div class="empty-state">No assets tracked yet.</div>';
             return;
         }
@@ -413,7 +415,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         
         try {
             // Join addresses by comma for batch query
-            const joined = trackedAddresses.join(',');
+            const joined = trackedItems.map(item => item.address).join(',');
             const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${joined}`);
             const data = await res.json();
             
@@ -434,7 +436,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             const seen = new Set();
             data.pairs.forEach(p => {
                 const addr = p.baseToken.address.toLowerCase();
-                if (!seen.has(addr) && trackedAddresses.some(t => t.toLowerCase() === addr)) {
+                if (!seen.has(addr) && trackedItems.some(t => t.address.toLowerCase() === addr)) {
                     seen.add(addr);
                     uniquePairs.push(p);
                 }
@@ -443,17 +445,27 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             listEl.innerHTML = '';
             
             // Render
-            trackedAddresses.forEach(addr => {
+            trackedItems.forEach(item => {
+                const addr = item.address;
                 const pair = uniquePairs.find(p => p.baseToken.address.toLowerCase() === addr.toLowerCase());
                 const card = document.createElement('div');
                 card.className = 'asset-card';
                 
+                let pnlHtml = "";
+                if (pair && item.entryPrice > 0) {
+                    const currentPrice = Number(pair.priceUsd);
+                    const pnl = ((currentPrice - item.entryPrice) / item.entryPrice) * 100.0;
+                    const pnlColor = pnl >= 0 ? "var(--success)" : "var(--danger)";
+                    const pnlSign = pnl > 0 ? "+" : "";
+                    pnlHtml = `<span style="font-size: 0.75rem; color: ${pnlColor}; margin-left: 6px;">(${pnlSign}${pnl.toFixed(1)}%)</span>`;
+                }
+
                 if (pair) {
                     card.innerHTML = `
                         <div class="asset-info">
                             <span class="asset-symbol">${pair.baseToken.symbol}</span>
-                            <span class="asset-chain">${pair.chainId}</span>
-                            <span class="asset-price">$${Number(pair.priceUsd).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})}</span>
+                            <span class="asset-chain">${pair.chainId} ${item.entryPrice > 0 ? `| Entry: $${item.entryPrice}` : ''}</span>
+                            <span class="asset-price">$${Number(pair.priceUsd).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6})} ${pnlHtml}</span>
                         </div>
                         <button class="btn-icon" onclick="removeAsset('${addr}')" title="Stop Tracking">
                             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -479,13 +491,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             
             // Still allow deleting offline tokens
             listEl.innerHTML = '';
-             trackedAddresses.forEach(addr => {
+             trackedItems.forEach(item => {
+                const addr = item.address;
                 const card = document.createElement('div');
                 card.className = 'asset-card';
                 card.innerHTML = `
                         <div class="asset-info">
                             <span class="asset-symbol">Offline Data</span>
-                            <span class="asset-chain">${addr.substring(0,6)}...${addr.substring(addr.length-4)}</span>
+                            <span class="asset-chain">${addr.substring(0,6)}...${addr.substring(addr.length-4)} ${item.entryPrice > 0 ? `| Entry: $${item.entryPrice}` : ''}</span>
                         </div>
                         <button class="btn-icon" onclick="removeAsset('${addr}')" title="Stop Tracking">
                             <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -498,7 +511,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     async function addAsset() {
         const addrInput = document.getElementById('contract');
+        const entryInput = document.getElementById('entryPrice');
         const addr = addrInput.value.trim();
+        const entryPrice = parseFloat(entryInput.value) || 0.0;
         const btn = document.getElementById('btnAdd');
 
         if (!addr) {
@@ -506,11 +521,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             return;
         }
 
-        if (trackedAddresses.length >= MAX_ASSETS) {
+        if (trackedItems.length >= MAX_ASSETS) {
             return;
         }
 
-        if (trackedAddresses.some(a => a.toLowerCase() === addr.toLowerCase())) {
+        if (trackedItems.some(a => a.address.toLowerCase() === addr.toLowerCase())) {
             alert('This asset is already tracked.');
             return;
         }
@@ -530,10 +545,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 return;
             }
 
-            trackedAddresses.push(addr);
+            trackedItems.push({ address: addr, entryPrice: entryPrice });
             await saveConfig();
             
             addrInput.value = '';
+            entryInput.value = '';
             updateUI();
             
             // Switch to list to see the added token
@@ -552,7 +568,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
 
     async function removeAsset(addr) {
-        trackedAddresses = trackedAddresses.filter(a => a.toLowerCase() !== addr.toLowerCase());
+        trackedItems = trackedItems.filter(a => a.address.toLowerCase() !== addr.toLowerCase());
         await saveConfig();
         updateUI();
         renderList();
@@ -560,12 +576,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     function updateUI() {
         const countSpan = document.getElementById('assetCount');
-        countSpan.innerText = trackedAddresses.length;
+        countSpan.innerText = trackedItems.length;
 
         const btnAdd = document.getElementById('btnAdd');
         const limitMsg = document.getElementById('limitMsg');
 
-        if (trackedAddresses.length >= MAX_ASSETS) {
+        if (trackedItems.length >= MAX_ASSETS) {
             btnAdd.style.display = 'none';
             limitMsg.style.display = 'block';
         } else {
